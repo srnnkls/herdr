@@ -1236,6 +1236,7 @@ impl App {
             | Method::TerminalResize(_)
             | Method::TabSetGeometry(_)
             | Method::TabClaimGeometry(_)
+            | Method::TabReleaseGeometry(_)
             | Method::ControlList(_) => {
                 return responses::encode_error(
                     request.id,
