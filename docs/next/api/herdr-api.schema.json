@@ -323,6 +323,26 @@
           ],
           "type": "string"
         },
+        "TerminalResumePoint": {
+          "description": "A byte offset into one terminal's output. `epoch` changes whenever the\nterminal's screen changes without output (resize, clear) or the server\nrestarts, so an offset from another epoch cannot resume.",
+          "properties": {
+            "epoch": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "epoch",
+            "offset"
+          ],
+          "type": "object"
+        },
         "TerminalScreenKind": {
           "enum": [
             "primary",
@@ -357,6 +377,17 @@
                 "string",
                 "null"
               ]
+            },
+            "resume": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/control_record/$defs/TerminalResumePoint"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The output position this snapshot reflects."
             },
             "seq": {
               "format": "uint64",
@@ -508,6 +539,15 @@
               "description": "Base64 raw PTY bytes.",
               "type": "string"
             },
+            "offset": {
+              "description": "Output position of the first byte.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "seq": {
               "format": "uint64",
               "minimum": 0,
@@ -523,6 +563,33 @@
             "attach_id",
             "seq",
             "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The attach continues from `resume` without a snapshot; the output\nrecords that follow start at its offset.",
+          "properties": {
+            "attach_id": {
+              "type": "string"
+            },
+            "resume": {
+              "$ref": "#/schemas/control_record/$defs/TerminalResumePoint"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "terminal.resumed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attach_id",
+            "seq",
+            "resume"
           ],
           "type": "object"
         },
@@ -5482,6 +5549,17 @@
               "$ref": "#/schemas/request/$defs/TerminalAttachMode",
               "default": "raw"
             },
+            "resume": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TerminalResumePoint"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Continue from this point of the terminal's output instead of taking\na snapshot, when the server still holds the bytes after it."
+            },
             "rows": {
               "format": "uint16",
               "maximum": 65535,
@@ -5585,6 +5663,48 @@
             "attach_id",
             "cols",
             "rows"
+          ],
+          "type": "object"
+        },
+        "TerminalResumePoint": {
+          "description": "A byte offset into one terminal's output. `epoch` changes whenever the\nterminal's screen changes without output (resize, clear) or the server\nrestarts, so an offset from another epoch cannot resume.",
+          "properties": {
+            "epoch": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "epoch",
+            "offset"
+          ],
+          "type": "object"
+        },
+        "TerminalSnapshotParams": {
+          "description": "`terminal.snapshot`: resynchronize an attach, by its output since\n`resume` when the server still holds it, else by a fresh snapshot.",
+          "properties": {
+            "attach_id": {
+              "type": "string"
+            },
+            "resume": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TerminalResumePoint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "attach_id"
           ],
           "type": "object"
         },
@@ -7631,7 +7751,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/TerminalAttachTarget"
+              "$ref": "#/schemas/request/$defs/TerminalSnapshotParams"
             }
           },
           "required": [

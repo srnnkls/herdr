@@ -926,6 +926,16 @@ was produced after it. `history_limit_bytes` bounds the primary history
 (default 1 MiB, maximum 8 MiB) and `truncated` reports a cut. While the
 alternate screen is active only that screen is captured.
 
+Servers advertising `output_resume` keep the newest 1 MiB of each attached
+terminal's output. Snapshots carry `resume` (`epoch`, `offset`), the output
+position they reflect, and every `terminal.output` record carries the `offset`
+of its first byte. A `terminal.attach` or `terminal.snapshot` with `resume` set
+to a position still held gets a `terminal.resumed` record (`attach_id`, `seq`,
+`resume`) instead of a snapshot, followed by the output since that position, so
+the client continues the screen and history it already has. Anything the server
+no longer holds, a resize, a clear, or a server restart changes the epoch or
+drops the bytes, and the request falls back to a full snapshot.
+
 `terminal.output` carries raw PTY bytes as base64 with a per-attach `seq`. When
 a client falls behind, the server drops output and sends `terminal.gap`;
 request `terminal.snapshot` to resynchronize, which emits a fresh

@@ -507,8 +507,13 @@ impl TerminalRuntime {
         self.0.set_raw_query_authority(attach_id)
     }
 
-    pub(crate) fn snapshot_raw(&self, attach_id: &str, history_limit_bytes: usize) -> bool {
-        self.0.snapshot_raw(attach_id, history_limit_bytes)
+    pub(crate) fn snapshot_raw(
+        &self,
+        attach_id: &str,
+        history_limit_bytes: usize,
+        resume: Option<crate::api::schema::TerminalResumePoint>,
+    ) -> bool {
+        self.0.snapshot_raw(attach_id, history_limit_bytes, resume)
     }
 
     pub(crate) fn detach_raw(

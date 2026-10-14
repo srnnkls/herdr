@@ -516,6 +516,7 @@ fn control_records_use_dotted_type_tags() {
         attach_id: "1-0".into(),
         seq: 7,
         bytes: "aGk=".into(),
+        offset: None,
     };
     let json = serde_json::to_value(&output).unwrap();
     assert_eq!(json["type"], "terminal.output");

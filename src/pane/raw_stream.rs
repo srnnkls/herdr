@@ -4,19 +4,22 @@
 //! published under the pane's content write lock, so a snapshot taken under
 //! the same lock is exactly ordered against the output that follows it.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
 use crate::api::control::{ControlOutbound, ControlOutboundSender};
-use crate::api::schema::{TerminalDetachReason, TerminalSnapshot};
+use crate::api::schema::{TerminalDetachReason, TerminalResumePoint, TerminalSnapshot};
 
 /// Bytes a single tap may have queued but not yet written to its socket.
 pub(crate) const DEFAULT_TAP_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 /// Longest unfinished sequence carried across reads for snapshots; a
 /// larger one (a graphics payload mid-flight) is abandoned instead.
 const MAX_PENDING_TAIL_BYTES: usize = 256 * 1024;
+/// Recent output a terminal keeps for `resume` once it has been attached.
+pub(crate) const RESUME_LOG_BYTES: usize = 1024 * 1024;
 
 /// Where control-stream input bytes go, bypassing the app loop.
 #[derive(Clone)]
@@ -103,7 +106,7 @@ struct RawTap {
 }
 
 impl RawTap {
-    fn publish(&mut self, bytes: &[u8]) {
+    fn publish(&mut self, bytes: &[u8], offset: Option<u64>) {
         if !self.armed {
             return;
         }
@@ -123,6 +126,7 @@ impl RawTap {
         let sent = self.outbound.send(ControlOutbound::Output {
             attach_id: self.attach_id.clone(),
             seq: self.seq,
+            offset,
             bytes: Bytes::copy_from_slice(bytes),
             budget: Arc::clone(&self.budget),
         });
@@ -148,6 +152,16 @@ impl RawTap {
             .is_ok()
     }
 
+    fn send_resumed(&self, resume: TerminalResumePoint) -> bool {
+        self.outbound
+            .send(ControlOutbound::Resumed {
+                attach_id: self.attach_id.clone(),
+                seq: self.seq,
+                resume,
+            })
+            .is_ok()
+    }
+
     fn send_detached(&self, reason: TerminalDetachReason) {
         let _ = self.outbound.send(ControlOutbound::Detached {
             attach_id: self.attach_id.clone(),
@@ -166,6 +180,67 @@ pub(crate) struct RawTapRegistry {
     /// The parser holds them; screen state cannot, so a snapshot replays
     /// them ahead of the read that completes the sequence.
     pending_tail: Mutex<Vec<u8>>,
+    /// Set by the first attach; until then reads skip the resume log.
+    resume_enabled: AtomicBool,
+    resume_log: Mutex<ResumeLog>,
+}
+
+/// The newest output of one terminal, addressed by byte offset within an
+/// epoch.
+#[derive(Default)]
+struct ResumeLog {
+    epoch: u64,
+    /// Offset just past the newest byte.
+    end: u64,
+    bytes: VecDeque<u8>,
+}
+
+impl ResumeLog {
+    fn renew(&mut self) {
+        self.epoch = new_resume_epoch();
+        self.bytes.clear();
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        self.end += bytes.len() as u64;
+        let keep = bytes.len().min(RESUME_LOG_BYTES);
+        self.bytes.extend(&bytes[bytes.len() - keep..]);
+        let excess = self.bytes.len().saturating_sub(RESUME_LOG_BYTES);
+        self.bytes.drain(..excess);
+    }
+
+    fn point(&self, behind: usize) -> TerminalResumePoint {
+        TerminalResumePoint {
+            epoch: self.epoch,
+            offset: self.end.saturating_sub(behind as u64),
+        }
+    }
+
+    /// The bytes after `point`, when it lies in this log.
+    fn since(&self, point: TerminalResumePoint) -> Option<Vec<u8>> {
+        let start = self.end - self.bytes.len() as u64;
+        if point.epoch != self.epoch || point.offset < start || point.offset > self.end {
+            return None;
+        }
+        let skip = usize::try_from(point.offset - start).ok()?;
+        Some(self.bytes.iter().skip(skip).copied().collect())
+    }
+}
+
+/// A fresh epoch, unique across terminals and server runs, within the
+/// integers JSON clients represent exactly.
+fn new_resume_epoch() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_usize(COUNTER.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default(),
+    );
+    (hasher.finish() & ((1 << 53) - 1)).max(1)
 }
 
 impl RawTapRegistry {
@@ -176,6 +251,11 @@ impl RawTapRegistry {
     /// Track where the parser stands after a PTY read. Call with the
     /// content write lock held, for every read, taps or not.
     pub(crate) fn note_read(&self, bytes: &[u8]) {
+        if self.resume_enabled.load(Ordering::Acquire) {
+            if let Ok(mut log) = self.resume_log.lock() {
+                log.push(bytes);
+            }
+        }
         let Ok(mut pending) = self.pending_tail.lock() else {
             return;
         };
@@ -217,8 +297,39 @@ impl RawTapRegistry {
         let Ok(mut taps) = self.taps.lock() else {
             return;
         };
+        let offset = self.output_offset(bytes.len());
         for tap in taps.iter_mut() {
-            tap.publish(bytes);
+            tap.publish(bytes, offset);
+        }
+    }
+
+    /// Offset of the last `behind` bytes of the output read so far.
+    fn output_offset(&self, behind: usize) -> Option<u64> {
+        if !self.resume_enabled.load(Ordering::Acquire) {
+            return None;
+        }
+        self.resume_log
+            .lock()
+            .ok()
+            .map(|log| log.end.saturating_sub(behind as u64))
+    }
+
+    fn resume_point(&self, behind: usize) -> Option<TerminalResumePoint> {
+        if !self.resume_enabled.load(Ordering::Acquire) {
+            return None;
+        }
+        self.resume_log.lock().ok().map(|log| log.point(behind))
+    }
+
+    /// Starts an epoch: the screen changed in a way output does not
+    /// describe, so no earlier offset can resume. Call with the content
+    /// write lock held.
+    pub(crate) fn invalidate_resume(&self) {
+        if !self.resume_enabled.load(Ordering::Acquire) {
+            return;
+        }
+        if let Ok(mut log) = self.resume_log.lock() {
+            log.renew();
         }
     }
 
@@ -248,6 +359,12 @@ impl RawTapRegistry {
         if let Ok(mut taps) = self.taps.lock() {
             taps.push(tap);
             self.count.store(taps.len(), Ordering::Release);
+        }
+        if !self.resume_enabled.load(Ordering::Acquire) {
+            if let Ok(mut log) = self.resume_log.lock() {
+                log.renew();
+                self.resume_enabled.store(true, Ordering::Release);
+            }
         }
     }
 
@@ -286,10 +403,13 @@ impl RawTapRegistry {
     /// The first snapshot arms the tap and, with it, query suppression: a
     /// query the client never sees must still be answered here.
     /// Call with the content write lock held.
+    /// With `resume` still in the log, the tap instead continues from it:
+    /// a `terminal.resumed` record, then the output since.
     pub(crate) fn send_snapshot(
         &self,
         attach_id: &str,
         history_limit_bytes: usize,
+        resume: Option<TerminalResumePoint>,
         snapshot: impl FnOnce(u64) -> Option<TerminalSnapshot>,
     ) -> bool {
         let Ok(mut taps) = self.taps.lock() else {
@@ -300,16 +420,33 @@ impl RawTapRegistry {
         };
         tap.dropped = 0;
         tap.history_limit_bytes = history_limit_bytes;
+        let resumed = resume.and_then(|point| {
+            let log = self.resume_log.lock().ok()?;
+            log.since(point).map(|bytes| (point, bytes))
+        });
+        if let Some((point, bytes)) = resumed {
+            tap.armed = true;
+            let sent = tap.send_resumed(point);
+            if !bytes.is_empty() {
+                tap.publish(&bytes, Some(point.offset));
+            }
+            self.sync_suppression(&taps);
+            return sent;
+        }
+        let pending = self
+            .pending_tail
+            .lock()
+            .map(|pending| pending.clone())
+            .unwrap_or_default();
         match snapshot(tap.seq) {
-            Some(snapshot) => {
+            Some(mut snapshot) => {
+                snapshot.resume = self.resume_point(pending.len());
                 tap.armed = true;
                 let sent = tap.send_snapshot(snapshot);
                 // The snapshot shows state before the unfinished sequence;
                 // replay its bytes so the read that completes it parses whole.
-                if let Ok(pending) = self.pending_tail.lock() {
-                    if !pending.is_empty() {
-                        tap.publish(&pending);
-                    }
+                if !pending.is_empty() {
+                    tap.publish(&pending, self.output_offset(pending.len()));
                 }
                 self.sync_suppression(&taps);
                 sent
@@ -333,14 +470,17 @@ impl RawTapRegistry {
             .lock()
             .map(|pending| pending.clone())
             .unwrap_or_default();
+        let resume = self.resume_point(pending.len());
+        let offset = self.output_offset(pending.len());
         for tap in taps.iter_mut().filter(|tap| tap.armed) {
-            let Some(snapshot) = snapshot(tap.seq, tap.history_limit_bytes) else {
+            let Some(mut snapshot) = snapshot(tap.seq, tap.history_limit_bytes) else {
                 continue;
             };
+            snapshot.resume = resume;
             tap.dropped = 0;
             tap.send_snapshot(snapshot);
             if !pending.is_empty() {
-                tap.publish(&pending);
+                tap.publish(&pending, offset);
             }
         }
     }
@@ -490,6 +630,7 @@ mod tests {
             },
             state: TerminalStateInfo::default(),
             truncated: false,
+            resume: None,
         }
     }
 
@@ -499,7 +640,7 @@ mod tests {
         attach_id: &str,
         rx: &std::sync::mpsc::Receiver<ControlOutbound>,
     ) {
-        assert!(registry.send_snapshot(attach_id, 1 << 20, |seq| Some(snapshot(seq))));
+        assert!(registry.send_snapshot(attach_id, 1 << 20, None, |seq| Some(snapshot(seq))));
         assert!(matches!(
             rx.try_recv(),
             Ok(ControlOutbound::Snapshot { .. })
@@ -513,6 +654,119 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A PTY read as the pane delivers it: tracked, then published.
+    fn read(registry: &RawTapRegistry, bytes: &[u8]) {
+        registry.note_read(bytes);
+        registry.publish(bytes);
+    }
+
+    fn records(rx: &std::sync::mpsc::Receiver<ControlOutbound>) -> Vec<ControlOutbound> {
+        rx.try_iter().collect()
+    }
+
+    fn snapshot_point(records: &[ControlOutbound]) -> TerminalResumePoint {
+        records
+            .iter()
+            .find_map(|record| match record {
+                ControlOutbound::Snapshot { snapshot, .. } => snapshot.resume,
+                _ => None,
+            })
+            .expect("snapshot with a resume point")
+    }
+
+    #[test]
+    fn resume_log_keeps_the_newest_bytes_by_offset() {
+        let mut log = ResumeLog::default();
+        log.renew();
+        log.push(b"abc");
+        log.push(&vec![b'x'; RESUME_LOG_BYTES]);
+        log.push(b"def");
+        let end = log.end;
+        assert_eq!(end, RESUME_LOG_BYTES as u64 + 6);
+        assert_eq!(log.bytes.len(), RESUME_LOG_BYTES);
+        let at = |offset| TerminalResumePoint {
+            epoch: log.epoch,
+            offset,
+        };
+        assert_eq!(log.since(at(end - 3)).as_deref(), Some(&b"def"[..]));
+        assert_eq!(log.since(at(end)).as_deref(), Some(&b""[..]));
+        assert!(log.since(at(2)).is_none(), "evicted bytes cannot resume");
+        assert!(log.since(at(end + 1)).is_none());
+        assert!(
+            log.since(TerminalResumePoint {
+                epoch: log.epoch + 1,
+                offset: end
+            })
+            .is_none(),
+            "another epoch cannot resume"
+        );
+    }
+
+    #[test]
+    fn a_tap_resumes_with_exactly_the_output_since_its_point() {
+        let registry = RawTapRegistry::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        read(&registry, b"before ");
+        assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
+        let point = snapshot_point(&records(&rx));
+        read(&registry, b"live");
+        let live = records(&rx);
+        assert!(
+            matches!(&live[..], [ControlOutbound::Output { offset, bytes, .. }]
+                if *offset == Some(point.offset) && &bytes[..] == b"live"),
+            "{live:?}"
+        );
+        assert!(registry.remove("a1", TerminalDetachReason::Closed));
+        read(&registry, b" missed");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert("a2".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        let resume = TerminalResumePoint {
+            epoch: point.epoch,
+            offset: point.offset + 4,
+        };
+        assert!(registry.send_snapshot("a2", 1 << 20, Some(resume), |_| {
+            panic!("a resumable point takes no snapshot")
+        }));
+        let resumed = records(&rx);
+        assert!(
+            matches!(&resumed[..], [
+                ControlOutbound::Resumed { resume: got, .. },
+                ControlOutbound::Output { offset, bytes, .. },
+            ] if *got == resume && *offset == Some(resume.offset) && &bytes[..] == b" missed"),
+            "{resumed:?}"
+        );
+        read(&registry, b"!");
+        assert_eq!(output_seqs(&rx), vec![2], "the tap stays armed");
+    }
+
+    #[test]
+    fn an_invalidated_point_falls_back_to_a_snapshot() {
+        let registry = RawTapRegistry::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        read(&registry, b"text");
+        assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
+        let point = snapshot_point(&records(&rx));
+        registry.invalidate_resume();
+        assert!(registry.send_snapshot("a1", 1 << 20, Some(point), |seq| Some(snapshot(seq))));
+        let fresh = snapshot_point(&records(&rx));
+        assert_ne!(fresh.epoch, point.epoch);
+        assert_eq!(fresh.offset, point.offset);
+    }
+
+    #[test]
+    fn output_before_the_first_attach_carries_no_offset() {
+        let registry = RawTapRegistry::default();
+        read(&registry, b"unwatched");
+        assert!(registry.resume_point(0).is_none());
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
+        assert_eq!(snapshot_point(&records(&rx)).offset, 0);
     }
 
     #[test]

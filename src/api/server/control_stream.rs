@@ -180,6 +180,7 @@ fn writer_loop(
             ControlOutbound::Output {
                 attach_id,
                 seq,
+                offset,
                 bytes,
                 budget,
             } => {
@@ -187,6 +188,7 @@ fn writer_loop(
                     attach_id,
                     seq,
                     bytes: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    offset,
                 });
                 budget.release(bytes.len());
                 line
@@ -199,6 +201,15 @@ fn writer_loop(
                 attach_id,
                 seq,
                 dropped_bytes,
+            }),
+            ControlOutbound::Resumed {
+                attach_id,
+                seq,
+                resume,
+            } => encode_record(&ControlRecord::Resumed {
+                attach_id,
+                seq,
+                resume,
             }),
             ControlOutbound::Detached { attach_id, reason } => {
                 encode_record(&ControlRecord::Detached { attach_id, reason })

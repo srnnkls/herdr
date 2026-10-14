@@ -14,7 +14,7 @@ use crate::api::schema::{
     ErrorResponse, GeometryController, GeometryControllerKind, ResponseResult, SuccessResponse,
     TabChrome, TabClaimGeometryParams, TabReleaseGeometryParams, TabSetGeometryParams,
     TerminalAttachGeometry, TerminalAttachParams, TerminalAttachTarget, TerminalDetachReason,
-    TerminalQueryAuthority, TerminalResizeParams,
+    TerminalQueryAuthority, TerminalResizeParams, TerminalSnapshotParams,
 };
 use crate::pane::raw_stream::{RawTapBudget, DEFAULT_TAP_BUDGET_BYTES};
 use crate::protocol::ServerMessage;
@@ -813,7 +813,7 @@ impl HeadlessServer {
                 pane_id,
             },
         ));
-        if !runtime.snapshot_raw(&attach_id, history_limit_bytes) {
+        if !runtime.snapshot_raw(&attach_id, history_limit_bytes, params.resume) {
             handle.send_line(error(
                 String::new(),
                 "snapshot_failed",
@@ -919,7 +919,7 @@ impl HeadlessServer {
         &mut self,
         id: String,
         handle: Option<&ControlConnectionHandle>,
-        params: &TerminalAttachTarget,
+        params: &TerminalSnapshotParams,
     ) -> String {
         let connection_id = match self.control_connection_id(handle) {
             Ok(connection_id) => connection_id,
@@ -940,7 +940,7 @@ impl HeadlessServer {
         let Some(runtime) = self.control_runtime(&terminal_id) else {
             return error(id, "not_found", format!("terminal {terminal_id} not found"));
         };
-        if !runtime.snapshot_raw(&params.attach_id, history_limit_bytes) {
+        if !runtime.snapshot_raw(&params.attach_id, history_limit_bytes, params.resume) {
             return error(
                 id,
                 "snapshot_failed",

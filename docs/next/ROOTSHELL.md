@@ -46,6 +46,17 @@ installer or package manager, then restart the server after saving work.
 Merging the feature upstream does not automatically migrate fork users. We will
 announce an official version containing the feature and migration instructions.
 
+## Resuming output
+
+Servers advertising the `output_resume` control feature keep the newest 1 MiB
+of each attached terminal's output, addressed by byte offset within an epoch.
+Snapshots report `resume` (`epoch`, `offset`), and `terminal.output` records
+report the `offset` of their first byte. `terminal.attach` and
+`terminal.snapshot` accept `resume`: when the server still holds the output
+after that point, it sends `terminal.resumed` and the missed bytes instead of a
+snapshot. Resizes, clears, and server restarts start a new epoch, so a stale
+point always falls back to a full snapshot.
+
 ## Releasing geometry
 
 Servers advertising the `geometry_release` control feature accept

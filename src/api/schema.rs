@@ -262,7 +262,7 @@ pub enum Method {
     #[serde(rename = "terminal.input")]
     TerminalInput(TerminalInputParams),
     #[serde(rename = "terminal.snapshot")]
-    TerminalSnapshot(TerminalAttachTarget),
+    TerminalSnapshot(TerminalSnapshotParams),
     #[serde(rename = "terminal.resize")]
     TerminalResize(TerminalResizeParams),
     #[serde(rename = "tab.set_geometry")]

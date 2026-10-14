@@ -4,8 +4,8 @@ use crate::api::control::{ControlConnectionHandle, ControlOutbound};
 use crate::api::schema::{
     ControlClientInfo, ControlOpenParams, EmptyParams, Method, Request, TabChrome,
     TabClaimGeometryParams, TabReleaseGeometryParams, TabSetGeometryParams, TabTarget,
-    TerminalAttachGeometry, TerminalAttachMode, TerminalAttachParams, TerminalAttachTarget,
-    TerminalDetachReason, TerminalInputParams, TerminalQueryAuthority,
+    TerminalAttachGeometry, TerminalAttachMode, TerminalAttachParams, TerminalDetachReason,
+    TerminalInputParams, TerminalQueryAuthority, TerminalSnapshotParams,
 };
 
 /// Sends a request as a control stream would and returns the response the
@@ -60,12 +60,37 @@ fn drain(outbound: &std::sync::mpsc::Receiver<ControlOutbound>) -> Vec<serde_jso
         .try_iter()
         .map(|record| match record {
             ControlOutbound::Line(line) => serde_json::from_str(&line).expect("json line"),
-            ControlOutbound::Snapshot { attach_id, .. } => {
-                serde_json::json!({"type": "terminal.snapshot", "attach_id": attach_id})
-            }
-            ControlOutbound::Output { attach_id, seq, .. } => {
-                serde_json::json!({"type": "terminal.output", "attach_id": attach_id, "seq": seq})
-            }
+            ControlOutbound::Snapshot {
+                attach_id,
+                snapshot,
+            } => serde_json::json!({
+                "type": "terminal.snapshot",
+                "attach_id": attach_id,
+                "resume": snapshot.resume,
+            }),
+            ControlOutbound::Output {
+                attach_id,
+                seq,
+                offset,
+                bytes,
+                ..
+            } => serde_json::json!({
+                "type": "terminal.output",
+                "attach_id": attach_id,
+                "seq": seq,
+                "offset": offset,
+                "bytes": String::from_utf8_lossy(&bytes),
+            }),
+            ControlOutbound::Resumed {
+                attach_id,
+                seq,
+                resume,
+            } => serde_json::json!({
+                "type": "terminal.resumed",
+                "attach_id": attach_id,
+                "seq": seq,
+                "resume": resume,
+            }),
             ControlOutbound::Gap { attach_id, .. } => {
                 serde_json::json!({"type": "terminal.gap", "attach_id": attach_id})
             }
@@ -116,6 +141,7 @@ fn attach_params(target: &str) -> TerminalAttachParams {
         rows: None,
         cell_width_px: 0,
         cell_height_px: 0,
+        resume: None,
     }
 }
 
@@ -395,8 +421,9 @@ async fn control_stream_attaches_streams_and_releases_on_close() {
     let snapshot_again = send_control(
         &mut server,
         &handle,
-        Method::TerminalSnapshot(TerminalAttachTarget {
+        Method::TerminalSnapshot(TerminalSnapshotParams {
             attach_id: attach_id.clone(),
+            resume: None,
         }),
     )
     .expect("snapshot response");
@@ -1051,6 +1078,118 @@ async fn release_needs_a_control_stream_and_a_tab() {
         Method::TabReleaseGeometry(TabReleaseGeometryParams::default()),
     );
     assert_eq!(plain["error"]["code"], "control_stream_required");
+}
+
+fn snapshot_resume(records: &[serde_json::Value]) -> serde_json::Value {
+    records_of(records, "terminal.snapshot")
+        .last()
+        .expect("snapshot")["resume"]
+        .clone()
+}
+
+#[tokio::test]
+async fn reattach_resumes_from_the_output_it_missed() {
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    let (pane_id, _) = focused_ids(&server);
+    let (a, a_rx, _) = open_control_v2(&mut server, "a");
+    attach_id_of(&attach(&mut server, &a, &a_rx, attach_params(&pane_id)));
+    let point = snapshot_resume(&drain(&a_rx));
+    assert!(point["epoch"].as_u64().is_some(), "{point}");
+    focused_runtime(&server).test_process_pty_bytes(b"seen");
+    close_control(&mut server, &a);
+    focused_runtime(&server).test_process_pty_bytes(b"missed");
+
+    let (b, b_rx, _) = open_control_v2(&mut server, "b");
+    let offset = point["offset"].as_u64().expect("offset") + 4;
+    let attach_id = attach_id_of(&attach(
+        &mut server,
+        &b,
+        &b_rx,
+        TerminalAttachParams {
+            resume: Some(api::schema::TerminalResumePoint {
+                epoch: point["epoch"].as_u64().expect("epoch"),
+                offset,
+            }),
+            ..attach_params(&pane_id)
+        },
+    ));
+    let records = drain(&b_rx);
+    assert!(
+        records_of(&records, "terminal.snapshot").next().is_none(),
+        "{records:?}"
+    );
+    let resumed = records_of(&records, "terminal.resumed")
+        .next()
+        .expect("resumed record");
+    assert_eq!(resumed["attach_id"], attach_id);
+    assert_eq!(resumed["resume"]["offset"], offset);
+    let output = records_of(&records, "terminal.output")
+        .next()
+        .expect("missed output");
+    assert_eq!(output["bytes"], "missed");
+    assert_eq!(output["offset"], offset);
+}
+
+#[tokio::test]
+async fn a_resize_since_the_point_forces_a_snapshot() {
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    let (pane_id, _) = focused_ids(&server);
+    let (a, a_rx, _) = open_control_v2(&mut server, "a");
+    attach_id_of(&attach(&mut server, &a, &a_rx, attach_params(&pane_id)));
+    let point = snapshot_resume(&drain(&a_rx));
+    close_control(&mut server, &a);
+    focused_runtime(&server).resize(30, 100, 8, 16);
+
+    let (b, b_rx, _) = open_control_v2(&mut server, "b");
+    let point: api::schema::TerminalResumePoint =
+        serde_json::from_value(point).expect("resume point");
+    attach_id_of(&attach(
+        &mut server,
+        &b,
+        &b_rx,
+        TerminalAttachParams {
+            resume: Some(point),
+            ..attach_params(&pane_id)
+        },
+    ));
+    let records = drain(&b_rx);
+    assert!(records_of(&records, "terminal.resumed").next().is_none());
+    let fresh = snapshot_resume(&records);
+    assert_ne!(fresh["epoch"], point.epoch);
+}
+
+#[tokio::test]
+async fn a_gap_resyncs_by_resuming_the_same_attach() {
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    let (pane_id, _) = focused_ids(&server);
+    let (a, a_rx, _) = open_control_v2(&mut server, "a");
+    let attach_id = attach_id_of(&attach(&mut server, &a, &a_rx, attach_params(&pane_id)));
+    let point: api::schema::TerminalResumePoint =
+        serde_json::from_value(snapshot_resume(&drain(&a_rx))).expect("resume point");
+    focused_runtime(&server).test_process_pty_bytes(b"again");
+    drain(&a_rx);
+
+    let resynced = send_control(
+        &mut server,
+        &a,
+        Method::TerminalSnapshot(TerminalSnapshotParams {
+            attach_id: attach_id.clone(),
+            resume: Some(point),
+        }),
+    )
+    .expect("snapshot response");
+    assert_eq!(resynced["result"]["type"], "ok", "{resynced}");
+    let records = drain(&a_rx);
+    assert!(records_of(&records, "terminal.resumed").next().is_some());
+    assert_eq!(
+        records_of(&records, "terminal.output")
+            .next()
+            .expect("replayed output")["bytes"],
+        "again"
+    );
 }
 
 #[tokio::test]
