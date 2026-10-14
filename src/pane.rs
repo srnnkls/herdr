@@ -3775,6 +3775,7 @@ impl PaneRuntime {
         budget: Arc<RawTapBudget>,
         suppress_terminal_responses: bool,
         protocol: u32,
+        resume_bytes: usize,
     ) {
         let _content_write_guard = match self.content_write_lock.lock() {
             Ok(guard) => guard,
@@ -3786,6 +3787,7 @@ impl PaneRuntime {
             budget,
             suppress_terminal_responses,
             protocol,
+            resume_bytes,
         );
     }
 
@@ -4287,6 +4289,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1 << 20)),
             true,
             2,
+            1 << 20,
         );
         let (unarmed_tx, unarmed_rx) = std::sync::mpsc::channel();
         runtime.attach_raw(
@@ -4295,6 +4298,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1 << 20)),
             true,
             2,
+            1 << 20,
         );
         assert!(runtime.snapshot_raw("1-0", 1 << 20, None));
         runtime.test_process_pty_bytes(b"typed");
@@ -4333,6 +4337,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1 << 20)),
             true,
             1,
+            1 << 20,
         );
         runtime.set_raw_query_authority(Some("1-0"));
         // Output before the first snapshot never streams: the snapshot covers
@@ -4414,6 +4419,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1 << 20)),
             true,
             1,
+            1 << 20,
         );
         runtime.set_raw_query_authority(Some("1-0"));
         assert!(runtime.snapshot_raw("1-0", 1 << 20, None));
@@ -4465,6 +4471,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1 << 20)),
             true,
             1,
+            1 << 20,
         );
         assert!(runtime.snapshot_raw("1-0", 1 << 20, None));
         let _ = rx.try_iter().count();

@@ -18,8 +18,10 @@ pub(crate) const DEFAULT_TAP_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 /// Longest unfinished sequence carried across reads for snapshots; a
 /// larger one (a graphics payload mid-flight) is abandoned instead.
 const MAX_PENDING_TAIL_BYTES: usize = 256 * 1024;
-/// Recent output a terminal keeps for `resume` once it has been attached.
-pub(crate) const RESUME_LOG_BYTES: usize = 1024 * 1024;
+/// Upper bound for `advanced.control_resume_bytes`.
+pub(crate) const MAX_RESUME_LOG_BYTES: usize = 64 * 1024 * 1024;
+/// Largest `terminal.output` record a resume replays at once.
+const RESUME_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Where control-stream input bytes go, bypassing the app loop.
 #[derive(Clone)]
@@ -193,6 +195,7 @@ struct ResumeLog {
     /// Offset just past the newest byte.
     end: u64,
     bytes: VecDeque<u8>,
+    capacity: usize,
 }
 
 impl ResumeLog {
@@ -203,9 +206,18 @@ impl ResumeLog {
 
     fn push(&mut self, bytes: &[u8]) {
         self.end += bytes.len() as u64;
-        let keep = bytes.len().min(RESUME_LOG_BYTES);
+        let keep = bytes.len().min(self.capacity);
         self.bytes.extend(&bytes[bytes.len() - keep..]);
-        let excess = self.bytes.len().saturating_sub(RESUME_LOG_BYTES);
+        self.trim();
+    }
+
+    fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity.min(MAX_RESUME_LOG_BYTES);
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        let excess = self.bytes.len().saturating_sub(self.capacity);
         self.bytes.drain(..excess);
     }
 
@@ -334,8 +346,9 @@ impl RawTapRegistry {
     }
 
     /// Register a tap. Output numbering starts at one; the first snapshot is
-    /// requested separately so the attach response can precede it.
-    /// Call with the content write lock held.
+    /// requested separately so the attach response can precede it. The
+    /// terminal keeps `resume_bytes` of output from then on, as the latest
+    /// attach configured it. Call with the content write lock held.
     pub(crate) fn insert(
         &self,
         attach_id: String,
@@ -343,6 +356,7 @@ impl RawTapRegistry {
         budget: Arc<RawTapBudget>,
         suppress_responses: bool,
         protocol: u32,
+        resume_bytes: usize,
     ) {
         let tap = RawTap {
             attach_id,
@@ -360,8 +374,9 @@ impl RawTapRegistry {
             taps.push(tap);
             self.count.store(taps.len(), Ordering::Release);
         }
-        if !self.resume_enabled.load(Ordering::Acquire) {
-            if let Ok(mut log) = self.resume_log.lock() {
+        if let Ok(mut log) = self.resume_log.lock() {
+            log.set_capacity(resume_bytes);
+            if !self.resume_enabled.load(Ordering::Acquire) {
                 log.renew();
                 self.resume_enabled.store(true, Ordering::Release);
             }
@@ -427,8 +442,10 @@ impl RawTapRegistry {
         if let Some((point, bytes)) = resumed {
             tap.armed = true;
             let sent = tap.send_resumed(point);
-            if !bytes.is_empty() {
-                tap.publish(&bytes, Some(point.offset));
+            let mut offset = point.offset;
+            for chunk in bytes.chunks(RESUME_CHUNK_BYTES) {
+                tap.publish(chunk, Some(offset));
+                offset += chunk.len() as u64;
             }
             self.sync_suppression(&taps);
             return sent;
@@ -680,12 +697,13 @@ mod tests {
     fn resume_log_keeps_the_newest_bytes_by_offset() {
         let mut log = ResumeLog::default();
         log.renew();
+        log.set_capacity(1 << 20);
         log.push(b"abc");
-        log.push(&vec![b'x'; RESUME_LOG_BYTES]);
+        log.push(&vec![b'x'; 1 << 20]);
         log.push(b"def");
         let end = log.end;
-        assert_eq!(end, RESUME_LOG_BYTES as u64 + 6);
-        assert_eq!(log.bytes.len(), RESUME_LOG_BYTES);
+        assert_eq!(end, (1 << 20) as u64 + 6);
+        assert_eq!(log.bytes.len(), (1 << 20));
         let at = |offset| TerminalResumePoint {
             epoch: log.epoch,
             offset,
@@ -708,7 +726,14 @@ mod tests {
     fn a_tap_resumes_with_exactly_the_output_since_its_point() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            3,
+            1 << 20,
+        );
         read(&registry, b"before ");
         assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
         let point = snapshot_point(&records(&rx));
@@ -723,7 +748,14 @@ mod tests {
         read(&registry, b" missed");
 
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a2".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        registry.insert(
+            "a2".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            3,
+            1 << 20,
+        );
         let resume = TerminalResumePoint {
             epoch: point.epoch,
             offset: point.offset + 4,
@@ -744,10 +776,74 @@ mod tests {
     }
 
     #[test]
+    fn the_latest_attach_sets_how_much_output_is_kept() {
+        let registry = RawTapRegistry::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1 << 20)),
+            false,
+            3,
+            8,
+        );
+        assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
+        let point = snapshot_point(&records(&rx));
+        read(&registry, b"0123456789");
+        assert!(registry.remove("a1", TerminalDetachReason::Closed));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        registry.insert(
+            "a2".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1 << 20)),
+            false,
+            3,
+            1 << 20,
+        );
+        assert!(registry.send_snapshot("a2", 1 << 20, Some(point), |seq| Some(snapshot(seq))));
+        assert!(
+            matches!(records(&rx)[..], [ControlOutbound::Snapshot { .. }]),
+            "bytes beyond the configured size are gone"
+        );
+        let point = registry.resume_point(0).expect("resume point");
+        let big = vec![b'y'; RESUME_CHUNK_BYTES * 2 + 1];
+        read(&registry, &big);
+        records(&rx);
+        assert!(registry.send_snapshot("a2", 1 << 20, Some(point), |_| None));
+        let replay = records(&rx);
+        let sizes: Vec<_> = replay
+            .iter()
+            .filter_map(|record| match record {
+                ControlOutbound::Output { offset, bytes, .. } => Some((*offset, bytes.len())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sizes,
+            vec![
+                (Some(point.offset), RESUME_CHUNK_BYTES),
+                (
+                    Some(point.offset + RESUME_CHUNK_BYTES as u64),
+                    RESUME_CHUNK_BYTES
+                ),
+                (Some(point.offset + 2 * RESUME_CHUNK_BYTES as u64), 1),
+            ]
+        );
+    }
+
+    #[test]
     fn an_invalidated_point_falls_back_to_a_snapshot() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            3,
+            1 << 20,
+        );
         read(&registry, b"text");
         assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
         let point = snapshot_point(&records(&rx));
@@ -764,7 +860,14 @@ mod tests {
         read(&registry, b"unwatched");
         assert!(registry.resume_point(0).is_none());
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 3);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            3,
+            1 << 20,
+        );
         assert!(registry.send_snapshot("a1", 1 << 20, None, |seq| Some(snapshot(seq))));
         assert_eq!(snapshot_point(&records(&rx)).offset, 0);
     }
@@ -773,7 +876,14 @@ mod tests {
     fn taps_stay_silent_until_the_first_snapshot() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 1);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            1,
+            1 << 20,
+        );
         registry.publish(b"before");
         assert!(rx.try_recv().is_err());
         arm(&registry, "a1", &rx);
@@ -787,7 +897,14 @@ mod tests {
     fn query_suppression_starts_with_the_first_snapshot_and_ends_on_detach() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), true, 1);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            true,
+            1,
+            1 << 20,
+        );
         registry.set_authority(Some("a1"));
         assert!(!registry.suppress_terminal_responses());
         arm(&registry, "a1", &rx);
@@ -800,6 +917,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1024)),
             false,
             1,
+            1 << 20,
         );
         arm(&registry, "a2", &observer_rx);
         assert!(registry.remove("a1", TerminalDetachReason::Takeover));
@@ -823,6 +941,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1024)),
             true,
             1,
+            1 << 20,
         );
         registry.insert(
             "b1".into(),
@@ -830,6 +949,7 @@ mod tests {
             Arc::new(RawTapBudget::new(1024)),
             true,
             2,
+            1 << 20,
         );
         arm(&registry, "a1", &v1_rx);
         arm(&registry, "b1", &v2_rx);
@@ -896,7 +1016,14 @@ mod tests {
         assert_eq!(registry.pending_tail_for_test(), b"\x1b[3");
 
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), true, 1);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            true,
+            1,
+            1 << 20,
+        );
         arm(&registry, "a1", &rx);
         registry.note_read(b"1m");
         registry.publish(b"1m");
@@ -926,7 +1053,14 @@ mod tests {
     fn taps_number_output_from_one() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 1);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            1,
+            1 << 20,
+        );
         arm(&registry, "a1", &rx);
         registry.publish(b"one");
         registry.publish(b"two");
@@ -939,7 +1073,7 @@ mod tests {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
         let budget = Arc::new(RawTapBudget::new(4));
-        registry.insert("a1".into(), tx, Arc::clone(&budget), false, 1);
+        registry.insert("a1".into(), tx, Arc::clone(&budget), false, 1, 1 << 20);
         arm(&registry, "a1", &rx);
 
         registry.publish(b"1234");
@@ -973,7 +1107,14 @@ mod tests {
     fn removing_a_tap_sends_detached_and_stops_publishing() {
         let registry = RawTapRegistry::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        registry.insert("a1".into(), tx, Arc::new(RawTapBudget::new(1024)), false, 1);
+        registry.insert(
+            "a1".into(),
+            tx,
+            Arc::new(RawTapBudget::new(1024)),
+            false,
+            1,
+            1 << 20,
+        );
         assert!(registry.has_taps());
         assert!(registry.remove("a1", TerminalDetachReason::Takeover));
         assert!(!registry.has_taps());

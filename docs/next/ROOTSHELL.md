@@ -48,8 +48,10 @@ announce an official version containing the feature and migration instructions.
 
 ## Resuming output
 
-Servers advertising the `output_resume` control feature keep the newest 1 MiB
-of each attached terminal's output, addressed by byte offset within an epoch.
+Servers advertising the `output_resume` control feature keep the newest output
+of each attached terminal, addressed by byte offset within an epoch: 1 MiB by
+default, set with `advanced.control_resume_bytes` (capped at 64 MiB, applied
+from the next attach).
 Snapshots report `resume` (`epoch`, `offset`), and `terminal.output` records
 report the `offset` of their first byte. `terminal.attach` and
 `terminal.snapshot` accept `resume`: when the server still holds the output

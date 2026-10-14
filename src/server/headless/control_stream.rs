@@ -16,7 +16,7 @@ use crate::api::schema::{
     TerminalAttachGeometry, TerminalAttachParams, TerminalAttachTarget, TerminalDetachReason,
     TerminalQueryAuthority, TerminalResizeParams, TerminalSnapshotParams,
 };
-use crate::pane::raw_stream::{RawTapBudget, DEFAULT_TAP_BUDGET_BYTES};
+use crate::pane::raw_stream::{RawTapBudget, DEFAULT_TAP_BUDGET_BYTES, MAX_RESUME_LOG_BYTES};
 use crate::protocol::ServerMessage;
 
 use super::HeadlessServer;
@@ -789,12 +789,17 @@ impl HeadlessServer {
             }
             return error(id, "not_found", format!("terminal {terminal_id} not found"));
         };
+        let resume_bytes = self.app.state.control_resume_bytes;
         runtime.attach_raw(
             attach_id.clone(),
             handle.outbound(),
-            Arc::new(RawTapBudget::new(DEFAULT_TAP_BUDGET_BYTES)),
+            // Room for a whole resume replay, which is queued at once.
+            Arc::new(RawTapBudget::new(
+                DEFAULT_TAP_BUDGET_BYTES.max(resume_bytes.min(MAX_RESUME_LOG_BYTES)),
+            )),
             suppress,
             protocol,
+            resume_bytes,
         );
         handle.register_input(attach_id.clone(), runtime.raw_input_sink());
         if params.geometry == TerminalAttachGeometry::Terminal {

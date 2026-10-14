@@ -508,6 +508,7 @@ impl App {
             shell_mode: config.terminal.shell_mode,
             new_terminal_cwd: config.terminal.new_cwd.clone(),
             pane_scrollback_limit_bytes: config.advanced.scrollback_limit_bytes,
+            control_resume_bytes: config.advanced.control_resume_bytes,
             sound: config.ui.sound.clone(),
             toast_config: config.ui.toast.clone(),
             keybinds: config.keybinds(),
@@ -906,6 +907,7 @@ impl App {
 
         if !invalid_section("advanced") {
             self.state.pane_scrollback_limit_bytes = config.advanced.scrollback_limit_bytes;
+            self.state.control_resume_bytes = config.advanced.control_resume_bytes;
         }
 
         if !invalid_section("update") {

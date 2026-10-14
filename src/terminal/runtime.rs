@@ -493,6 +493,7 @@ impl TerminalRuntime {
         budget: std::sync::Arc<crate::pane::raw_stream::RawTapBudget>,
         suppress_terminal_responses: bool,
         protocol: u32,
+        resume_bytes: usize,
     ) {
         self.0.attach_raw(
             attach_id,
@@ -500,6 +501,7 @@ impl TerminalRuntime {
             budget,
             suppress_terminal_responses,
             protocol,
+            resume_bytes,
         )
     }
 

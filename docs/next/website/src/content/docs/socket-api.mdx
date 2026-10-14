@@ -926,8 +926,8 @@ was produced after it. `history_limit_bytes` bounds the primary history
 (default 1 MiB, maximum 8 MiB) and `truncated` reports a cut. While the
 alternate screen is active only that screen is captured.
 
-Servers advertising `output_resume` keep the newest 1 MiB of each attached
-terminal's output. Snapshots carry `resume` (`epoch`, `offset`), the output
+Servers advertising `output_resume` keep the newest output of each attached
+terminal, 1 MiB unless `advanced.control_resume_bytes` says otherwise. Snapshots carry `resume` (`epoch`, `offset`), the output
 position they reflect, and every `terminal.output` record carries the `offset`
 of its first byte. A `terminal.attach` or `terminal.snapshot` with `resume` set
 to a position still held gets a `terminal.resumed` record (`attach_id`, `seq`,
