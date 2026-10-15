@@ -1677,6 +1677,7 @@ impl PaneRuntime {
             },
             keyboard_protocol_ansi: self.terminal.kitty_keyboard_state_ansi(),
             input_state: self.input_state(),
+            cursor_ansi: self.terminal.cursor_state_ansi(),
             terminal_title: self.terminal_title(),
             initial_history_ansi: None,
         }
@@ -1887,6 +1888,7 @@ impl PaneRuntime {
             keyboard_protocol_flags,
             keyboard_protocol_ansi,
             input_state,
+            cursor_ansi,
             terminal_title,
             initial_history_ansi,
         } = state;
@@ -1920,6 +1922,9 @@ impl PaneRuntime {
         }
         if let Some(ansi) = initial_history_ansi.as_deref() {
             pane_terminal.seed_history_ansi(ansi);
+        }
+        if let Some(ansi) = cursor_ansi.as_deref() {
+            pane_terminal.seed_cursor_state_ansi(ansi);
         }
         let terminal = Arc::new(PaneTerminal::new(pane_terminal));
         let child_pid = Arc::new(AtomicU32::new(child_pid));

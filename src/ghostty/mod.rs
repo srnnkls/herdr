@@ -170,6 +170,7 @@ pub const MOUSE_FORMAT_SGR: ffi::GhosttyMouseFormat =
     ffi::GhosttyMouseFormat_GHOSTTY_MOUSE_FORMAT_SGR;
 
 pub const MODE_APPLICATION_CURSOR_KEYS: u16 = 1;
+pub const MODE_CURSOR_VISIBLE: u16 = 25;
 pub const MODE_FOCUS_EVENT: u16 = 1004;
 pub const MODE_MOUSE_UTF8: u16 = 1005;
 pub const MODE_MOUSE_SGR: u16 = 1006;

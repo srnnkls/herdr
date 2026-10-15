@@ -559,6 +559,11 @@ impl PaneTerminal {
             .filter(|ansi| !ansi.is_empty())
     }
 
+    #[cfg(unix)]
+    pub fn cursor_state_ansi(&self) -> Option<String> {
+        self.ghostty.cursor_state_ansi()
+    }
+
     pub fn encode_terminal_key(
         &self,
         key: crate::input::TerminalKey,
@@ -1675,6 +1680,42 @@ impl GhosttyPaneTerminal {
         core.kitty_keyboard.replay_ansi()
     }
 
+    /// The DECSCUSR and DECTCEM sequences that reproduce the cursor's shape
+    /// and visibility, or `None` while both are at their defaults.
+    #[cfg(unix)]
+    pub fn cursor_state_ansi(&self) -> Option<String> {
+        let mut core = self.core.lock().ok()?;
+        let visible = core
+            .terminal
+            .mode_get(crate::ghostty::MODE_CURSOR_VISIBLE)
+            .ok()?;
+        let GhosttyPaneCore {
+            terminal,
+            render_state,
+            decscusr_tracker,
+            ..
+        } = &mut *core;
+        render_state.update(terminal).ok()?;
+        let shape = cursor_shape_from_render_state(render_state, decscusr_tracker);
+        let mut ansi = String::new();
+        if shape != 0 {
+            ansi.push_str(&format!("\x1b[{shape} q"));
+        }
+        if !visible {
+            ansi.push_str("\x1b[?25l");
+        }
+        (!ansi.is_empty()).then_some(ansi)
+    }
+
+    #[cfg(unix)]
+    pub fn seed_cursor_state_ansi(&self, ansi: &str) {
+        let Ok(mut core) = self.core.lock() else {
+            return;
+        };
+        core.decscusr_tracker.observe(ansi.as_bytes());
+        core.terminal.write(ansi.as_bytes());
+    }
+
     pub fn keyboard_report_all_requested(&self) -> bool {
         self.core.lock().is_ok_and(|core| {
             let protocol = crate::input::KeyboardProtocol::from_kitty_flags(
@@ -2281,7 +2322,20 @@ fn cursor_state_from_render_state(
     decscusr_tracker: &DecscusrTracker,
 ) -> Option<TerminalCursorState> {
     let cursor = render_state.cursor_viewport().ok()??;
-    let shape = if decscusr_tracker.cursor_shape_overridden() {
+    let shape = cursor_shape_from_render_state(render_state, decscusr_tracker);
+    Some(TerminalCursorState {
+        x: cursor.x,
+        y: cursor.y,
+        visible: render_state.cursor_visible().ok()?,
+        shape,
+    })
+}
+
+fn cursor_shape_from_render_state(
+    render_state: &crate::ghostty::RenderState,
+    decscusr_tracker: &DecscusrTracker,
+) -> u8 {
+    if decscusr_tracker.cursor_shape_overridden() {
         render_state
             .cursor_visual_style()
             .ok()
@@ -2290,13 +2344,7 @@ fn cursor_state_from_render_state(
             .unwrap_or(0)
     } else {
         0
-    };
-    Some(TerminalCursorState {
-        x: cursor.x,
-        y: cursor.y,
-        visible: render_state.cursor_visible().ok()?,
-        shape,
-    })
+    }
 }
 
 type VisibleHyperlinks = Vec<((u16, u16), String, String)>;
@@ -4441,6 +4489,30 @@ mod tests {
         );
 
         assert_eq!(encoded, b"\x1bOA");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_cursor_state_carries_shape_and_visibility_to_a_fresh_terminal() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+
+        assert_eq!(pane.cursor_state_ansi(), None);
+
+        pane.process_pty_bytes(pane_id, 0, b"\x1b[6 q\x1b[?25l", &tx);
+        let ansi = pane.cursor_state_ansi().unwrap();
+
+        let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        let imported = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        assert!(imported.cursor_state().unwrap().visible);
+        imported.seed_cursor_state_ansi(&ansi);
+
+        let cursor = imported.cursor_state().unwrap();
+        assert!(!cursor.visible);
+        assert_eq!(cursor.shape, 6);
+        assert_eq!(imported.cursor_state_ansi(), Some(ansi));
     }
 
     #[cfg(unix)]

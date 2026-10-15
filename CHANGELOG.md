@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Server handoff now keeps each pane's cursor shape and visibility, so an agent that hid the terminal cursor does not show a stray block cursor after `herdr update --handoff`.
+
 ## [0.8.2] - 2026-08-19
 
 ### Added
