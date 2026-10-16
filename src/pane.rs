@@ -42,7 +42,7 @@ use self::agent_detection::{
     AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
 };
 use self::raw_stream::{RawInputSink, RawTapBudget, RawTapRegistry};
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub(crate) use self::terminal::{
