@@ -367,6 +367,7 @@ fn agent_command() -> Command {
                     "If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.",
                 ),
         )
+        .subcommand(agent_message_command())
         .subcommand(
             Command::new("rename")
                 .about("Rename an agent")
@@ -975,6 +976,69 @@ fn env_option() -> Arg {
     option("env", "KEY=VALUE")
         .action(ArgAction::Append)
         .help("Set an environment variable for the launched process")
+}
+
+fn agent_message_command() -> Command {
+    let send_options = |command: Command| {
+        command
+            .arg(Arg::new("text").value_name("TEXT|-"))
+            .arg(path_option("file", "PATH").help("Read the message body from a file"))
+            .arg(option("subject", "TEXT").help("Subject line shown under the header"))
+            .arg(flag("queue").help("Deliver when the target next becomes idle or done"))
+            .arg(flag("wait").help("Wait for the target to settle after delivery"))
+            .arg(
+                option("until", "STATUS")
+                    .action(ArgAction::Append)
+                    .requires("wait")
+                    .value_parser(["idle", "working", "blocked", "done", "unknown"]),
+            )
+            .arg(option("timeout", "MS").requires("wait"))
+    };
+    Command::new("message")
+        .about("Send attributed messages between agents")
+        .subcommand_required(true)
+        .subcommand(
+            send_options(
+                Command::new("send")
+                    .about("Send a message; herdr fills in the sender pane")
+                    .arg(required("target", "TARGET"))
+                    .arg(option("reply-to", "MSG_ID").help("Thread under an earlier message")),
+            )
+            .after_help(
+                "The target receives one header line before the body: [herdr message <id> from <pane> (<agent>, <cwd>) re <parent>]. TARGET is a pane id, agent name or agent session id. Without --queue, delivery to a blocked agent fails with agent_blocked.",
+            ),
+        )
+        .subcommand(send_options(
+            Command::new("reply")
+                .about("Reply to a message's sender")
+                .arg(required("message", "MSG_ID")),
+        ))
+        .subcommand(
+            Command::new("list")
+                .about("List messages; defaults to the current pane's inbox")
+                .arg(option("pane", "PANE_ID"))
+                .arg(option("from", "PANE_ID"))
+                .arg(flag("unread"))
+                .arg(option("thread", "MSG_ID"))
+                .arg(option("limit", "N"))
+                .arg(flag("json")),
+        )
+        .subcommand(
+            Command::new("show")
+                .about("Show a message")
+                .arg(required("message", "MSG_ID"))
+                .arg(flag("mark-read")),
+        )
+        .subcommand(
+            Command::new("read")
+                .about("Mark a delivered message as read")
+                .arg(required("message", "MSG_ID")),
+        )
+        .subcommand(
+            Command::new("last")
+                .about("Show the newest message delivered to the current pane")
+                .arg(option("pane", "PANE_ID")),
+        )
 }
 
 fn flag(name: &'static str) -> Arg {

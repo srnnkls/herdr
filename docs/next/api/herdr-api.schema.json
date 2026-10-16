@@ -744,6 +744,172 @@
     },
     "event": {
       "$defs": {
+        "AgentMessage": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "delivered_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "failure": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "in_reply_to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "read_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sender": {
+              "$ref": "#/schemas/event/$defs/AgentMessageSender"
+            },
+            "sent_at_ms": {
+              "description": "Unix epoch milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "$ref": "#/schemas/event/$defs/AgentMessageStatus"
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "$ref": "#/schemas/event/$defs/AgentMessageRecipient"
+            }
+          },
+          "required": [
+            "id",
+            "sent_at_ms",
+            "sender",
+            "target",
+            "body",
+            "status"
+          ],
+          "type": "object"
+        },
+        "AgentMessageRecipient": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agent_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
+        "AgentMessageSender": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agent_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/schemas/event/$defs/AgentMessageSenderKind"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "AgentMessageSenderKind": {
+          "enum": [
+            "pane",
+            "cli"
+          ],
+          "type": "string"
+        },
+        "AgentMessageStatus": {
+          "enum": [
+            "queued",
+            "delivered",
+            "failed",
+            "read"
+          ],
+          "type": "string"
+        },
         "AgentSessionInfo": {
           "properties": {
             "agent": {
@@ -1462,6 +1628,100 @@
                 "geometry_controller"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "sender": {
+                  "$ref": "#/schemas/event/$defs/AgentMessageSender"
+                },
+                "type": {
+                  "const": "agent_prompted",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "sender"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_sent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_delivered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_failed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_read",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -1493,7 +1753,12 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "agent_prompted",
+            "agent_message_sent",
+            "agent_message_delivered",
+            "agent_message_failed",
+            "agent_message_read"
           ],
           "type": "string"
         },
@@ -2117,8 +2382,131 @@
     },
     "request": {
       "$defs": {
+        "AgentMessageListParams": {
+          "properties": {
+            "caller": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/RequestCaller"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "from": {
+              "description": "Only messages sent from this pane id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "description": "Keep only the newest `limit` matches.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pane": {
+              "description": "Inbox pane. Defaults to the caller pane unless `thread` is set.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "thread": {
+              "description": "Only messages in the thread containing this message id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "unread": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "AgentMessageSendParams": {
+          "properties": {
+            "caller": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/RequestCaller"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "queue": {
+              "description": "Store the message and deliver it when the target next becomes idle or done.",
+              "type": "boolean"
+            },
+            "reply_to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "description": "Pane id, agent name or agent session id. Defaults to the sender of `reply_to`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "wait": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/AgentPromptWaitOptions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "AgentMessageTarget": {
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
+            "caller": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/RequestCaller"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "target": {
               "type": "string"
             },
@@ -4816,6 +5204,26 @@
           ],
           "type": "object"
         },
+        "RequestCaller": {
+          "description": "The CLI process identity that herdr attributes a request to.",
+          "properties": {
+            "cwd": {
+              "description": "The working directory of the requesting process.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "The `HERDR_PANE_ID` of the requesting process, when it runs inside a pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "ServerLiveHandoffParams": {
           "properties": {
             "expected_protocol": {
@@ -5232,6 +5640,66 @@
               "properties": {
                 "type": {
                   "const": "layout.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent.prompted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent.message_sent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent.message_delivered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent.message_failed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent.message_read",
                   "type": "string"
                 }
               },
@@ -6787,6 +7255,70 @@
         {
           "properties": {
             "method": {
+              "const": "agent.message.send",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentMessageSendParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.message.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentMessageListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.message.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentMessageTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.message.mark_read",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentMessageTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.split",
               "type": "string"
             },
@@ -8279,6 +8811,172 @@
           ],
           "type": "object"
         },
+        "AgentMessage": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "delivered_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "failure": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "in_reply_to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "read_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sender": {
+              "$ref": "#/schemas/success_response/$defs/AgentMessageSender"
+            },
+            "sent_at_ms": {
+              "description": "Unix epoch milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "$ref": "#/schemas/success_response/$defs/AgentMessageStatus"
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "$ref": "#/schemas/success_response/$defs/AgentMessageRecipient"
+            }
+          },
+          "required": [
+            "id",
+            "sent_at_ms",
+            "sender",
+            "target",
+            "body",
+            "status"
+          ],
+          "type": "object"
+        },
+        "AgentMessageRecipient": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agent_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
+        "AgentMessageSender": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agent_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/AgentMessageSenderKind"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "AgentMessageSenderKind": {
+          "enum": [
+            "pane",
+            "cli"
+          ],
+          "type": "string"
+        },
+        "AgentMessageStatus": {
+          "enum": [
+            "queued",
+            "delivered",
+            "failed",
+            "read"
+          ],
+          "type": "string"
+        },
         "AgentSessionInfo": {
           "properties": {
             "agent": {
@@ -9158,6 +9856,100 @@
                 "geometry_controller"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "sender": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessageSender"
+                },
+                "type": {
+                  "const": "agent_prompted",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "sender"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_sent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_delivered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_failed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_read",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -9204,7 +9996,12 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "agent_prompted",
+            "agent_message_sent",
+            "agent_message_delivered",
+            "agent_message_failed",
+            "agent_message_read"
           ],
           "type": "string"
         },
@@ -11346,6 +12143,68 @@
               "required": [
                 "type",
                 "agent"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/AgentInfo"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The target agent after delivery; absent while the message is queued."
+                },
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_sent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "messages": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "agent_message_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "messages"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/AgentMessage"
+                },
+                "type": {
+                  "const": "agent_message_info",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
               ],
               "type": "object"
             },

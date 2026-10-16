@@ -5,6 +5,7 @@ pub mod commands;
 pub mod common;
 pub mod events;
 pub mod integrations;
+pub mod messages;
 pub mod panes;
 pub mod plugins;
 pub mod response;
@@ -20,6 +21,7 @@ pub use commands::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
+pub use messages::*;
 pub use panes::*;
 pub use plugins::*;
 pub use response::*;
@@ -141,6 +143,14 @@ pub enum Method {
     AgentPrompt(AgentPromptParams),
     #[serde(rename = "agent.wait")]
     AgentWait(AgentWaitParams),
+    #[serde(rename = "agent.message.send")]
+    AgentMessageSend(AgentMessageSendParams),
+    #[serde(rename = "agent.message.list")]
+    AgentMessageList(AgentMessageListParams),
+    #[serde(rename = "agent.message.get")]
+    AgentMessageGet(AgentMessageTarget),
+    #[serde(rename = "agent.message.mark_read")]
+    AgentMessageMarkRead(AgentMessageTarget),
     #[serde(rename = "pane.split")]
     PaneSplit(PaneSplitParams),
     #[serde(rename = "pane.swap")]

@@ -181,6 +181,8 @@ pub struct AgentPromptParams {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<AgentPromptWaitOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<super::messages::RequestCaller>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

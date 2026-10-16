@@ -117,6 +117,7 @@ fn agent_start_and_prompt_requests_round_trip() {
             target: "reviewer".into(),
             text: "review this".into(),
             wait: None,
+            caller: None,
         }),
     };
     let prompt_json = serde_json::to_value(&prompt).unwrap();
@@ -136,6 +137,7 @@ fn agent_start_and_prompt_requests_round_trip() {
                 timeout_ms: Some(120_000),
                 submission_deadline: None,
             }),
+            caller: None,
         }),
     };
     let prompt_and_wait_json = serde_json::to_value(&prompt_and_wait).unwrap();

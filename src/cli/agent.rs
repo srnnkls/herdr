@@ -21,6 +21,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "read" => agent_read(&args[1..]),
         "send-keys" => agent_send_keys(&args[1..]),
         "prompt" => agent_prompt(&args[1..]),
+        "message" => super::agent_message::run(&args[1..]),
         "rename" => agent_rename(&args[1..]),
         "focus" => agent_focus(&args[1..]),
         "wait" => agent_wait(&args[1..]),
@@ -845,6 +846,7 @@ fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
                 timeout_ms,
                 submission_deadline: None,
             }),
+            caller: Some(super::agent_message::request_caller()),
         }),
     })?;
     super::print_response(&response)
@@ -936,6 +938,7 @@ fn print_agent_help() {
     eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");
     eprintln!("  herdr agent send-keys <target> <key> [key ...]");
     eprintln!("  herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]");
+    eprintln!("  herdr agent message send|reply|list|show|read|last ...");
     eprintln!("  herdr agent rename <target> <name>|--clear");
     eprintln!("  herdr agent focus <target>");
     eprintln!("  herdr agent wait <target> [--until STATUS]... [--timeout MS]");
