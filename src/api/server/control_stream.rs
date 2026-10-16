@@ -449,6 +449,7 @@ fn handle_request_line(
         Method::TerminalInput(params) => terminal_input(handle, api_tx, request_id.clone(), params),
         Method::EventsWait(_) => unsupported(request_id.clone(), "events.wait"),
         Method::AgentPrompt(_) => unsupported(request_id.clone(), "agent.prompt"),
+        Method::AgentMessageSend(_) => unsupported(request_id.clone(), "agent.message.send"),
         Method::AgentWait(_) => unsupported(request_id.clone(), "agent.wait"),
         Method::PaneWaitForOutput(_) => unsupported(request_id.clone(), "pane.wait_for_output"),
         method => dispatch_to_app_with_control(
