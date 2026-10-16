@@ -322,7 +322,23 @@ fn notification_command() -> Command {
 fn agent_command() -> Command {
     Command::new("agent")
         .about("Control and inspect agent panes")
-        .subcommand(Command::new("list").about("List agents"))
+        .subcommand(
+            Command::new("list")
+                .about("List agents grouped by workspace")
+                .arg(flag("flat").help("Print the flat agent.list response"))
+                .arg(
+                    Arg::new("project")
+                        .long("project")
+                        .visible_alias("workspace")
+                        .value_name("PATH")
+                        .num_args(0..=1)
+                        .value_hint(ValueHint::DirPath)
+                        .help("Only agents in this project, or in the caller's project without PATH"),
+                )
+                .after_help(
+                    "Each agent carries the identifiers agent prompt and agent message send accept: pane_id, name, and agent_session.value. An agent belongs to a project when its directory (foreground_cwd, else cwd) has the same project root: the repository's main checkout, so linked worktrees count as the checkout they were made from, or the directory itself outside a repository. Agents whose directory cannot be read belong to no project.",
+                ),
+        )
         .subcommand(id_command("get", "target", "Show an agent"))
         .subcommand(
             Command::new("read")

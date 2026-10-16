@@ -336,7 +336,7 @@ Metadata text is normalized before storage. Herdr trims surrounding whitespace, 
 For the pane-versus-agent model and complete orchestration examples, see [Agent automation](/docs/agent-automation/).
 
 ```bash
-herdr agent list
+herdr agent list [--flat] [--project [PATH] | --workspace [PATH]]
 herdr agent get <target>
 herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
 herdr agent send-keys <target> <key> [key ...]
@@ -356,7 +356,9 @@ herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
 
-Agent targets are either a unique live agent name or the pane ID that currently hosts the agent. Terminal IDs and bare agent-kind labels are not agent targets. Agents started through `agent start` require a name; manually launched agents remain unnamed and use their pane ID.
+Agent targets are either a unique live agent name or the pane ID that currently hosts the agent; `agent message send` also accepts an agent session id. Terminal IDs and bare agent-kind labels are not agent targets.
+
+`agent list` prints `agent_list_by_workspace`: one entry per workspace with live agents, in workspace order, each with `workspace_id`, `label`, and its `agents`. Every agent carries the identifiers prompts and messages accept (`pane_id`, `name`, `agent_session.value`) along with its kind (`agent`), `cwd`, `foreground_cwd`, and `agent_status`. `--flat` prints the unchanged `agent.list` response instead. `--project PATH` (alias `--workspace PATH`) keeps agents in that project, and `--project` without a path uses the caller's current directory. An agent's directory is its `foreground_cwd`, else its `cwd`; its project is the repository's main checkout, so a linked worktree counts as the checkout it was made from, or the directory itself outside a repository. Agents whose directory cannot be read belong to no project. Agents started through `agent start` require a name; manually launched agents remain unnamed and use their pane ID.
 
 `agent start` activates an existing available shell pane: the pane's interactive shell must own the foreground, with no foreground command, editor, or agent running. Topology must be created separately. Names are unique among live agents and must match `[a-z][a-z0-9_-]{0,31}`. The kind selects Herdr's canonical interactive executable, while arguments after `--` are passed to that executable. Supported kinds are `pi`, `claude`, `codex`, `gemini`, `cursor`, `devin`, `agy`, `cline`, `omp`, `mastracode`, `opencode`, `copilot`, `kimi`, `kiro`, `droid`, `amp`, `grok`, `hermes`, `kilo`, `qodercli`, `qwen`, `letta`, `maki`, and `muse`. A name follows the current pane occupant and is cleared when that agent exits, is released, or is replaced. Temporary detection uncertainty does not clear it.
 

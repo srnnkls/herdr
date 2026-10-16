@@ -8631,7 +8631,8 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "The session's `value` is accepted as an `agent.prompt` and `agent.message.send` target."
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
@@ -8673,12 +8674,14 @@
               "type": "boolean"
             },
             "name": {
+              "description": "Agent name; accepted as an `agent.prompt` and `agent.message.send` target.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "pane_id": {
+              "description": "Accepted as an `agent.prompt` and `agent.message.send` target.",
               "type": "string"
             },
             "revision": {

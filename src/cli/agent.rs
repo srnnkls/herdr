@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use crate::api::schema::{
     AgentPromptParams, AgentPromptWaitOptions, AgentReadParams, AgentRenameParams,
-    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
-    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
+    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, ErrorBody, ErrorResponse,
+    Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -16,7 +16,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
     };
 
     match subcommand {
-        "list" => agent_list(&args[1..]),
+        "list" => super::agent_list::run(&args[1..]),
         "get" => agent_get(&args[1..]),
         "read" => agent_read(&args[1..]),
         "send-keys" => agent_send_keys(&args[1..]),
@@ -434,18 +434,6 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
             print_agent_transport_error(err, "cli:agent:start", "agent_start_transport_failed")
         }
     }
-}
-
-fn agent_list(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() {
-        eprintln!("usage: herdr agent list");
-        return Ok(2);
-    }
-
-    super::print_response(&super::send_request(&Request {
-        id: "cli:agent:list".into(),
-        method: Method::AgentList(EmptyParams::default()),
-    })?)
 }
 
 fn agent_get(args: &[String]) -> std::io::Result<i32> {
@@ -933,7 +921,7 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
 
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
-    eprintln!("  herdr agent list");
+    eprintln!("  herdr agent list [--flat] [--project [PATH] | --workspace [PATH]]");
     eprintln!("  herdr agent get <target>");
     eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");
     eprintln!("  herdr agent send-keys <target> <key> [key ...]");

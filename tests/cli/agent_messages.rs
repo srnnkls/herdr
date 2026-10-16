@@ -180,6 +180,38 @@ fn agent_messages_are_attributed_threaded_and_queued() {
         .collect();
     assert_eq!(thread_ids, [message_id.clone(), reply_id]);
 
+    let grouped = run_cli_json(&socket_path, &["agent", "list"]);
+    assert_eq!(grouped["result"]["type"], "agent_list_by_workspace");
+    let groups = grouped["result"]["workspaces"].as_array().unwrap();
+    assert_eq!(groups.len(), 1);
+    let listed_panes: Vec<_> = groups[0]["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|agent| agent["pane_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(listed_panes, [alpha_pane.clone(), beta_pane.clone()]);
+    let in_project = run_cli_json(
+        &socket_path,
+        &[
+            "agent",
+            "list",
+            "--project",
+            base.to_str().unwrap(),
+            "--flat",
+        ],
+    );
+    assert_eq!(in_project["result"]["agents"].as_array().unwrap().len(), 2);
+    let elsewhere = base.join("bin");
+    let outside = run_cli_json(
+        &socket_path,
+        &["agent", "list", "--workspace", elsewhere.to_str().unwrap()],
+    );
+    assert!(outside["result"]["workspaces"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
     let from_script = run_cli_from_pane(
         &socket_path,
         None,
