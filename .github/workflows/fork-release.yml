@@ -3,7 +3,7 @@ name: Fork release
 on:
   push:
     tags:
-      - "v*-srnnkls.*"
+      - "v*-*"
 
 permissions:
   contents: read
@@ -56,7 +56,7 @@ jobs:
         run: |
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          TAG_VERSION="${TAG_VERSION%-srnnkls.*}"
+          TAG_VERSION="${TAG_VERSION%%-*}"
           if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
             echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $CARGO_VERSION"
             exit 1
